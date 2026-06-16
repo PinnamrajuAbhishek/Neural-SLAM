@@ -1,57 +1,109 @@
-# Neural SLAM Using RGB-D Data and Pose Regression
+# Neural SLAM using RGB-D Data and Pose Regression
+
+Deep learning-based SLAM pipeline that predicts 6-DoF camera poses directly
+from RGB-D image pairs using a dual ResNet18 encoder, with a simplified
+Active Neural SLAM frame-sampling strategy for efficient exploration.
+
+**Achieved ATE: 0.0156 m** (Procrustes-aligned) on held-out indoor scenes.
+
+Full writeup: [`docs/Neural_SLAM_Report.pdf`](docs/Neural_SLAM_Report.pdf)
 
 ## Overview
 
-This project implements a Neural SLAM (Simultaneous Localization and Mapping) system that estimates 6-DoF camera poses directly from RGB-D data using deep learning.
+Traditional SLAM relies on handcrafted feature extraction and geometric
+estimation, which struggles in visually complex or dynamic environments.
+This project trains a CNN to regress 6-DoF pose (3D position + quaternion
+orientation) directly from RGB and depth frames, removing the need for
+manual feature engineering.
 
-The system leverages a ResNet18-based pose regression network to predict translation and orientation parameters from synchronized RGB and depth images. Post-processing techniques including trajectory alignment and Gaussian smoothing are applied to improve localization accuracy.
+**Pipeline:**
+1. RGB and depth frames are encoded separately using two ResNet18 backbones
+   (ImageNet-pretrained, final FC layer removed).
+2. Features are concatenated and passed through a fully connected head that
+   outputs a 7D pose vector `[x, y, z, qx, qy, qz, qw]`.
+3. Quaternion outputs are L2-normalized during loss computation to keep
+   orientation predictions on the unit sphere.
+4. Predicted trajectories are aligned to ground truth using **Procrustes
+   analysis** (corrects scale/rotation/translation offsets) before computing
+   **Absolute Trajectory Error (ATE)**.
+5. An **Active Neural SLAM** frame-sampling strategy selects every Nth frame
+   (default N=10) instead of processing every frame, simulating selective
+   exploration to reduce compute.
 
-Additionally, the project explores Active Neural SLAM concepts through selective frame sampling strategies that reduce computational overhead while preserving mapping quality.
+## Repo Structure
 
-## Key Features
+```
+neural-slam-repo/
+├── src/
+│   ├── dataset.py      # MultiSceneNeuralSLAMDataset + train/test scene split
+│   ├── model.py         # ResNet18 dual-encoder PoseRegressionModel + loss
+│   ├── train.py          # Training loop
+│   ├── evaluate.py       # Procrustes-aligned ATE computation
+│   └── visualize.py      # Trajectory plots + active frame sampling demo
+├── docs/
+│   └── Neural_SLAM_Report.pdf
+├── assets/
+│   └── (sample trajectory plots go here)
+├── requirements.txt
+└── README.md
+```
 
-* RGB-D based pose estimation
-* ResNet18 pose regression architecture
-* Quaternion-based orientation prediction
-* Trajectory alignment using Procrustes/Kabsch methods
-* Gaussian trajectory smoothing
-* Active frame selection strategy
-* Absolute Trajectory Error (ATE) evaluation
+## Data Format
 
-## Methodology
+Each scene folder should be structured as:
 
-1. RGB and depth images are extracted from ROS bag datasets.
-2. Images are preprocessed and resized.
-3. RGB-D inputs are fed into a ResNet18-based neural network.
-4. The model predicts 6-DoF poses:
+```
+office1/
+├── rgb/frame_00000.png ...
+├── depth/depth_00000.png ...
+└── odom_data.csv   # columns: x, y, z, qx, qy, qz, qw
+```
 
-   * Position (x, y, z)
-   * Orientation (qx, qy, qz, qw)
-5. Predicted trajectories are aligned and smoothed.
-6. Performance is evaluated using Absolute Trajectory Error (ATE).
+Place all scene folders (`office1`, `office2`, ...) under one `data_root`
+directory. The dataset class in `dataset.py` was originally built around a
+ROS2 rosbag → PNG/CSV extraction pipeline (RGB topic, depth topic, and
+odometry messages parsed via the `rosbags` library); the extraction script
+itself is not included here since it is environment-specific, but any
+RGB-D + 6-DoF pose dataset in the format above will work directly with this
+code.
 
-## Tech Stack
+## Usage
 
-* Python
-* PyTorch
-* OpenCV
-* NumPy
-* Pandas
-* SciPy
-* Matplotlib
+```bash
+pip install -r requirements.txt
 
-## Applications
+# Train
+python src/train.py --data_root /path/to/data --epochs 50 --batch_size 8
 
-* Autonomous Navigation
-* Mobile Robotics
-* Indoor Localization
-* Intelligent Mapping Systems
-* Autonomous Exploration
+# Evaluate (computes Procrustes-aligned ATE)
+python src/evaluate.py --data_root /path/to/data --checkpoint pose_regression_model.pth
+
+# Visualize trajectories + per-frame error
+python src/visualize.py --prefix eval
+```
+
+## Results
+
+| Metric | Value |
+|---|---|
+| Absolute Trajectory Error (ATE) | 0.0156 m |
+| Backbone | ResNet18 (dual encoder, ImageNet-pretrained) |
+| Epochs | 50 |
+| Optimizer | Adam, lr=1e-4 |
+| Active SLAM frame stride | every 10th frame |
+
+Trajectory alignment was performed using Procrustes analysis (scale +
+rotation correction) prior to ATE computation.
 
 ## Future Work
 
-* Reinforcement Learning based Active SLAM
-* Dynamic Object Handling
-* Semantic Mapping
-* Real-time Deployment
-* Multi-Sensor Fusion
+- Incorporate dynamic object filtering for non-static scenes
+- Reinforcement-learning-based frame selection for true Active SLAM
+  (current version uses a fixed stride, not a learned policy)
+- Extend to full 3D semantic mapping
+
+
+
+Built as part of M.Tech coursework (Neural Networks & Deep Learning,
+AI & Data Analytics, NIT Calicut). See full report for literature review
+and detailed methodology.
